@@ -1,0 +1,5 @@
+{
+  "name": "AI Blackboard Teacher",
+  "description": "An interactive AI teaching assistant that renders explanations with Markdown and Mathematical formulas on a virtual blackboard interface.",
+  "requestFramePermissions": []
+}
