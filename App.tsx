@@ -94,11 +94,12 @@ const App = () => {
       const audioBuffer = await decodeAudioData(base64Audio);
       audioCacheRef.current.set(index, audioBuffer);
     } catch (err: any) {
-      console.error(`Failed to load audio for step ${index}`, err);
       // If we hit a rate limit or quota error, disable audio for this session to prevent spamming
-      if (err.status === 429 || (err.message && err.message.includes("429"))) {
-         console.warn("Audio generation disabled due to quota limits.");
+      if (err.message === "QUOTA_EXCEEDED" || err.status === 429 || (err.message && err.message.includes("429"))) {
+         console.warn(`Audio quota exceeded at step ${index}. Disabling audio for this session.`);
          isAudioDisabledRef.current = true;
+      } else {
+         console.error(`Failed to load audio for step ${index}`, err);
       }
       throw err; 
     }
@@ -121,7 +122,7 @@ const App = () => {
             buffer = audioCacheRef.current.get(currentStepIndex);
          }
        } catch (e) {
-         console.error("Could not play audio", e);
+         // Error handled in fetchAudioForStep (logging/disabling)
          setIsPlaying(false);
          return;
        }
@@ -132,6 +133,17 @@ const App = () => {
         // MANUAL MODE: Just stop playing when finished, do not auto-advance
         setIsPlaying(false);
       });
+      
+      // --- LAZY PRE-FETCH STRATEGY ---
+      // Once we start playing step N, we try to fetch N+1 in the background.
+      // This is less aggressive than a loop and spaces requests out by audio duration.
+      const nextIndex = currentStepIndex + 1;
+      if (nextIndex < steps.length && !audioCacheRef.current.has(nextIndex) && !isAudioDisabledRef.current) {
+        fetchAudioForStep(steps[nextIndex], nextIndex, voiceRef.current).catch(e => {
+            // Background fetch errors are just warnings
+            console.debug(`Lazy pre-fetch for step ${nextIndex} failed or skipped.`);
+        });
+      }
     }
   };
 
@@ -183,34 +195,19 @@ const App = () => {
     voiceRef.current = voice;
     isAudioDisabledRef.current = false; // Reset circuit breaker on new request
 
-    // Kick off Practice Question generation in BACKGROUND (Parallel)
-    // We do NOT await this here, allowing the lesson to render first.
-    generatePracticeQuestion(apiKey, text)
-      .then((data) => {
-         if (loadingSessionRef.current === currentSession) {
-            setPracticeQuestion(data);
-            setIsPracticeLoading(false);
-         }
-      })
-      .catch((err) => {
-         console.warn("Background practice generation failed:", err);
-         if (loadingSessionRef.current === currentSession) {
-            setIsPracticeLoading(false);
-         }
-      });
-
     try {
       // 1. Generate the explanation steps (Text) - Main Thread
       const generatedSteps = await generateExplanationSteps(apiKey, text, imageBase64);
       
       if (loadingSessionRef.current !== currentSession) return;
 
-      // 2. IMPORTANT: Pre-fetch the first step's audio BEFORE rendering the UI.
+      // 2. IMPORTANT: Pre-fetch ONLY the first step's audio BEFORE rendering the UI.
+      // Subsequent steps will be lazy-fetched during playback to avoid 429 Quota errors.
       if (generatedSteps.length > 0 && !isAudioDisabledRef.current) {
          try {
            await fetchAudioForStep(generatedSteps[0], 0, voice);
          } catch (e) {
-           console.warn("Initial audio fetch failed, but proceeding to show text.", e);
+           console.warn("Initial audio fetch failed. Switching to text-only mode.");
          }
       }
 
@@ -220,32 +217,28 @@ const App = () => {
       setSteps(generatedSteps);
       setIsThinking(false);
 
-      if (generatedSteps.length > 0) {
-        // 4. BACKGROUND PRE-FETCHING for remaining steps
-        (async () => {
-          for (let i = 1; i < generatedSteps.length; i++) {
-             if (loadingSessionRef.current !== currentSession) break;
-             if (isAudioDisabledRef.current) break; // Stop fetching if quota exceeded
-
-             // Wait 7 seconds between background requests to avoid 429 errors
-             await new Promise(resolve => setTimeout(resolve, 7000));
-             
-             if (loadingSessionRef.current !== currentSession) break;
-             if (isAudioDisabledRef.current) break;
-
-             if (!audioCacheRef.current.has(i)) {
-               try {
-                 await fetchAudioForStep(generatedSteps[i], i, voice); 
-               } catch (e) {
-                 console.warn(`Background fetch for step ${i} failed. Will retry when reached.`);
-               }
-             }
-          }
-        })();
-      }
+      // 4. SEQUENTIAL PRACTICE GENERATION
+      // Only start generating practice question AFTER the main content is ready.
+      // This prevents double-hitting the API rate limit at the start.
+      generatePracticeQuestion(apiKey, text)
+        .then((data) => {
+           if (loadingSessionRef.current === currentSession) {
+              setPracticeQuestion(data);
+              setIsPracticeLoading(false);
+           }
+        })
+        .catch((err) => {
+           console.warn("Background practice generation failed:", err);
+           if (loadingSessionRef.current === currentSession) {
+              setIsPracticeLoading(false);
+           }
+        });
+      
     } catch (error) {
       console.error("Error generating content:", error);
       setIsThinking(false);
+      // Ensure practice loading stops if main generation fails
+      setIsPracticeLoading(false);
     }
   };
 
@@ -547,7 +540,7 @@ const App = () => {
                isQAMode={isQAMode}
             />
             <footer className={clsx("mt-3 text-center text-[10px] hidden md:block", isDark ? "text-stone-600" : "text-stone-400")}>
-              由 Google Gemini 3 Flash 與 Web Audio API 強力驅動
+              Powered by Google Gemini 3 Flash & Web Audio API
             </footer>
          </div>
       </aside>

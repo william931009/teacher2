@@ -17,9 +17,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       setError('請輸入 API Key');
       return;
     }
-    // Basic validation for Google API keys
-    if (!key.startsWith('AIza')) {
-       setError('無效的 API Key 格式 (應以 AIza 開頭)');
+    
+    // Simple length check for Gemini keys (usually starts with AIza, but avoiding strict prefix to be future proof)
+    if (key.length < 20) {
+       setError('API Key 格式似乎不正確');
        return;
     }
 
@@ -33,7 +34,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       if (isValid) {
         onLogin(key.trim());
       } else {
-        setError('驗證失敗：API Key 無效或專案未啟用 Gemini API');
+        setError('驗證失敗：API Key 無效或帳戶額度不足');
       }
     } catch (err) {
       setError('連線錯誤，請檢查網路狀態');
@@ -57,7 +58,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
              </div>
              <h1 className="text-3xl font-bold text-stone-100 mb-2 tracking-tight">AI 智慧黑板老師</h1>
              <p className="text-stone-500 text-sm text-center">
-               請輸入您的 Google Gemini API Key 以開始課程
+               請輸入您的 Gemini API Key 以開始課程
              </p>
           </div>
 

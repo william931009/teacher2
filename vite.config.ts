@@ -5,8 +5,10 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // We intentionally do NOT expose process.env.API_KEY here.
-    // This ensures the app relies strictly on the user-inputted key via the UI.
+    // Explicitly nullify the API_KEY environment variable in the build.
+    // This guarantees that the application cannot accidentally use a build-time key
+    // and must rely on the key provided by the user at runtime.
+    'process.env.API_KEY': JSON.stringify(undefined),
   },
   server: {
     port: 3000,

@@ -9,13 +9,13 @@ interface InputSectionProps {
   isQAMode?: boolean;
 }
 
-// Updated voice list with 5 distinct options and clearer descriptions
+// Voices for Gemini TTS
 const VOICES = [
   { id: 'Kore', name: '👩‍🏫 溫柔的女老師 (Kore)' },
-  { id: 'Zephyr', name: '👩‍🔬 知性的女老師 (Zephyr)' },
+  { id: 'Puck', name: '👩‍🔬 清晰的女老師 (Puck)' },
   { id: 'Fenrir', name: '👨‍🏫 沉穩的男老師 (Fenrir)' },
-  { id: 'Puck', name: '🙋‍♂️ 活潑的男老師 (Puck)' },
   { id: 'Charon', name: '🧔 磁性的男老師 (Charon)' },
+  { id: 'Zephyr', name: '🙋‍♂️ 中性的老師 (Zephyr)' },
 ];
 
 export const InputSection: React.FC<InputSectionProps> = ({ onSend, isProcessing, isDark, isQAMode = false }) => {

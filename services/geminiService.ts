@@ -9,18 +9,40 @@ export const MODEL_NAMES = {
 };
 
 /**
+ * Helper function to retry operations with exponential backoff
+ */
+async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
+  try {
+    return await operation();
+  } catch (error: any) {
+    // Check for 429 or specific Quota error messages
+    const isQuotaError = 
+      error.status === 429 || 
+      (error.message && error.message.includes("429")) || 
+      (error.message && error.message.includes("Quota"));
+
+    if (isQuotaError && retries > 0) {
+      console.warn(`API Quota hit. Retrying in ${delay}ms... (Attempts left: ${retries})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return retryWithBackoff(operation, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
+
+/**
  * Validates the API key by making a lightweight request.
  */
 export const validateApiKey = async (apiKey: string): Promise<boolean> => {
   if (!apiKey) return false;
   
   const ai = new GoogleGenAI({ apiKey });
+  
   try {
-    // Use the teacher model for a quick validation check (minimal token usage)
-    await ai.models.generateContent({
+    await retryWithBackoff(() => ai.models.generateContent({
       model: MODEL_NAMES.TEACHER,
       contents: [{ parts: [{ text: "Test" }] }],
-    });
+    }), 1, 1000); // Less retries for validation
     return true;
   } catch (error) {
     console.warn("API Key Verification Failed:", error);
@@ -44,7 +66,7 @@ export const generateExplanationSteps = async (apiKey: string, text: string, ima
     }
 
     if (imageBase64) {
-      const base64Data = imageBase64.split(',')[1] || imageBase64;
+      const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
       parts.push({
         inlineData: {
           mimeType: "image/jpeg",
@@ -55,7 +77,7 @@ export const generateExplanationSteps = async (apiKey: string, text: string, ima
 
     if (parts.length === 0) throw new Error("No input provided");
 
-    const response = await ai.models.generateContent({
+    const response = await retryWithBackoff(() => ai.models.generateContent({
       model: MODEL_NAMES.TEACHER,
       contents: [{ parts }],
       config: {
@@ -83,7 +105,7 @@ Each object in the array must have exactly these fields:
           },
         },
       },
-    });
+    }));
 
     const responseText = response.text || "[]";
     const steps = JSON.parse(responseText) as ExplanationStep[];
@@ -103,7 +125,7 @@ export const generatePracticeQuestion = async (apiKey: string, originalQuestion:
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await retryWithBackoff(() => ai.models.generateContent({
       model: MODEL_NAMES.TEACHER,
       contents: [{ parts: [{ text: `Original Question: ${originalQuestion}` }] }],
       config: {
@@ -127,7 +149,7 @@ Output strictly as a JSON object with the following fields:
           required: ["question", "answer"],
         },
       },
-    });
+    }));
 
     const responseText = response.text || "{}";
     return JSON.parse(responseText) as PracticeQuestion;
@@ -146,7 +168,7 @@ export const generateTeacherVoice = async (apiKey: string, text: string, voiceNa
   const ai = new GoogleGenAI({ apiKey });
   
   try {
-    const response = await ai.models.generateContent({
+    const response = await retryWithBackoff(() => ai.models.generateContent({
       model: MODEL_NAMES.TTS,
       contents: [{ parts: [{ text }] }],
       config: {
@@ -157,16 +179,17 @@ export const generateTeacherVoice = async (apiKey: string, text: string, voiceNa
           },
         },
       },
-    });
+    }));
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) throw new Error("No audio generated from Gemini TTS");
     return base64Audio;
 
   } catch (error: any) {
-    // Check for quota exhaustion specifically
+    // If retry failed and we still have a 429, we throw a specific error for the UI to handle cleanly
     if (error.status === 429 || (error.message && error.message.includes("429"))) {
-       console.error("Gemini TTS Quota Exceeded");
+       console.warn("Gemini TTS Quota Exceeded despite retries.");
+       throw new Error("QUOTA_EXCEEDED");
     }
     console.error("Gemini API Error (TTS):", error);
     throw error;
@@ -214,13 +237,13 @@ Rules:
   });
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await retryWithBackoff(() => ai.models.generateContent({
       model: MODEL_NAMES.CHAT,
       contents: contents,
       config: {
         systemInstruction: systemInstruction,
       }
-    });
+    }));
 
     return response.text || "抱歉，我現在無法回答這個問題。";
   } catch (error) {
