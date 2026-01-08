@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 import { ExplanationStep, ChatMessage, MessageRole, PracticeQuestion } from "../types";
 
 // Constants for model names based on SDK guidelines
@@ -33,12 +33,12 @@ async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 3, del
 /**
  * Generates structured explanation steps for a math/science problem.
  * 
+ * @param apiKey - The user's API Key
  * @param prompt - The question text
  * @param imageBase64 - Optional base64 image string
  */
-export const generateExplanationSteps = async (prompt: string, imageBase64?: string): Promise<ExplanationStep[]> => {
-  // Use process.env.API_KEY directly
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const generateExplanationSteps = async (apiKey: string, prompt: string, imageBase64?: string): Promise<ExplanationStep[]> => {
+  const ai = new GoogleGenAI({ apiKey });
   
   try {
     const parts: any[] = [];
@@ -60,7 +60,7 @@ export const generateExplanationSteps = async (prompt: string, imageBase64?: str
 
     if (parts.length === 0) throw new Error("No input provided");
 
-    const response = await retryWithBackoff(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: MODEL_NAMES.TEACHER,
       contents: [{ parts }],
       config: {
@@ -101,12 +101,13 @@ Each object in the array must have exactly these fields:
 
 /**
  * Generates a practice question similar to the original one.
+ * @param apiKey - The user's API Key
  */
-export const generatePracticeQuestion = async (originalQuestion: string): Promise<PracticeQuestion> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const generatePracticeQuestion = async (apiKey: string, originalQuestion: string): Promise<PracticeQuestion> => {
+  const ai = new GoogleGenAI({ apiKey });
 
   try {
-    const response = await retryWithBackoff(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: MODEL_NAMES.TEACHER,
       contents: [{ parts: [{ text: `Original Question: ${originalQuestion}` }] }],
       config: {
@@ -143,14 +144,15 @@ Output strictly as a JSON object with the following fields:
 /**
  * Generates audio for a given text using the specialized TTS model.
  * 
+ * @param apiKey - The user's API Key
  * @param text - The text to speak
  * @param voiceName - The voice to use (default: Kore)
  */
-export const generateTeacherVoice = async (text: string, voiceName: string = 'Kore'): Promise<string | undefined> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const generateTeacherVoice = async (apiKey: string, text: string, voiceName: string = 'Kore'): Promise<string | undefined> => {
+  const ai = new GoogleGenAI({ apiKey });
   
   try {
-    const response = await retryWithBackoff(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: MODEL_NAMES.TTS,
       contents: [{ parts: [{ text }] }],
       config: {
@@ -183,13 +185,15 @@ export const generateTeacherVoice = async (text: string, voiceName: string = 'Ko
 
 /**
  * Handles conversational follow-up questions based on the current blackboard context.
+ * @param apiKey - The user's API Key
  */
 export const generateChatResponse = async (
+  apiKey: string,
   history: ChatMessage[], 
   currentSteps: ExplanationStep[],
   userQuestion: string
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
 
   // Construct context from current steps
   const contextDescription = currentSteps.map((step, i) => 
@@ -219,7 +223,7 @@ Rules:
   });
 
   try {
-    const response = await retryWithBackoff(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: MODEL_NAMES.CHAT,
       contents: contents,
       config: {

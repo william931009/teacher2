@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { BookOpen, Eraser, Sun, Moon, Maximize2, Minimize2 } from 'lucide-react';
+import { BookOpen, Eraser, LogOut, Sun, Moon, Maximize2, Minimize2 } from 'lucide-react';
 import { Blackboard } from './components/Blackboard';
 import { PlayerControls } from './components/PlayerControls';
 import { InputSection } from './components/InputSection';
 import { StepList } from './components/StepList';
+import { LoginScreen } from './components/LoginScreen';
 import { ChatPanel } from './components/ChatPanel';
 import { ExplanationStep, ChatMessage, MessageRole, PracticeQuestion } from './types';
 import { resumeAudioContext, decodeAudioData, playAudio } from './services/audioUtils';
@@ -16,6 +17,11 @@ import {
 import clsx from 'clsx';
 
 const App = () => {
+  // --- Auth State ---
+  const [apiKey, setApiKey] = useState<string | null>(() => {
+    return localStorage.getItem('gemini_api_key');
+  });
+
   // --- App State ---
   const [steps, setSteps] = useState<ExplanationStep[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -46,6 +52,28 @@ const App = () => {
 
   // --- Core Logic ---
 
+  const handleLogin = (key: string) => {
+    localStorage.setItem('gemini_api_key', key);
+    setApiKey(key);
+    // Reset states on login
+    setSteps([]);
+    setCurrentStepIndex(0);
+    isAudioDisabledRef.current = false;
+  };
+
+  const handleLogout = () => {
+    stopAudio();
+    localStorage.removeItem('gemini_api_key');
+    setApiKey(null);
+    setSteps([]);
+    setCurrentStepIndex(0);
+    setChatHistory([]);
+    setIsQAMode(false);
+    setPracticeQuestion(null);
+    setIsPracticeVisible(false);
+    audioCacheRef.current.clear();
+  };
+
   const stopAudio = () => {
     if (activeSourceRef.current) {
       try {
@@ -58,12 +86,12 @@ const App = () => {
   };
 
   const fetchAudioForStep = async (step: ExplanationStep, index: number, voice: string) => {
-    if (isAudioDisabledRef.current) return;
+    if (!apiKey || isAudioDisabledRef.current) return;
     if (audioCacheRef.current.has(index)) return; 
     
     try {
-      // Use service without passing apiKey
-      const base64Audio = await generateTeacherVoice(step.spokenText, voice);
+      // STRICT: Pass apiKey explicitly as first argument
+      const base64Audio = await generateTeacherVoice(apiKey, step.spokenText, voice);
       
       // Handle potential undefined return if no audio was generated
       if (base64Audio) {
@@ -91,8 +119,10 @@ const App = () => {
 
     if (!buffer) {
        try {
-          await fetchAudioForStep(steps[currentStepIndex], currentStepIndex, voiceRef.current);
-          buffer = audioCacheRef.current.get(currentStepIndex);
+         if (apiKey) {
+            await fetchAudioForStep(steps[currentStepIndex], currentStepIndex, voiceRef.current);
+            buffer = audioCacheRef.current.get(currentStepIndex);
+         }
        } catch (e) {
          setIsPlaying(false);
          return;
@@ -128,6 +158,8 @@ const App = () => {
   // --- Event Handlers ---
 
   const handleSend = async (text: string, imageBase64: string | null, voice: string) => {
+    if (!apiKey) return;
+    
     // BRANCH: If in QA Mode, handle as chat message
     if (isQAMode) {
        await handleQASend(text);
@@ -157,9 +189,9 @@ const App = () => {
     isAudioDisabledRef.current = false; 
 
     try {
-      // 1. Generate Explanation - Service uses process.env.API_KEY
+      // 1. Generate Explanation - Pass apiKey first
       const safeImage = imageBase64 === null ? undefined : imageBase64;
-      const generatedSteps = await generateExplanationSteps(text, safeImage);
+      const generatedSteps = await generateExplanationSteps(apiKey, text, safeImage);
       
       if (loadingSessionRef.current !== currentSession) return;
 
@@ -176,8 +208,8 @@ const App = () => {
       setSteps(generatedSteps);
       setIsThinking(false);
 
-      // 4. Generate Practice
-      generatePracticeQuestion(text)
+      // 4. Generate Practice - Pass apiKey first
+      generatePracticeQuestion(apiKey, text)
         .then((data) => {
            if (loadingSessionRef.current === currentSession) {
               setPracticeQuestion(data);
@@ -199,6 +231,8 @@ const App = () => {
   };
 
   const handleQASend = async (text: string) => {
+    if (!apiKey) return;
+    
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: MessageRole.USER,
@@ -209,7 +243,8 @@ const App = () => {
     setIsThinking(true);
 
     try {
-      const answer = await generateChatResponse(chatHistory, steps, text);
+      // Pass apiKey first
+      const answer = await generateChatResponse(apiKey, chatHistory, steps, text);
       
       const modelMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -282,6 +317,11 @@ const App = () => {
     setIsFullscreen(!isFullscreen);
   };
 
+  // --- Render Login Screen if no API Key ---
+  if (!apiKey) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className={clsx(
       "flex flex-col md:flex-row h-[100dvh] w-full font-sans overflow-hidden transition-colors duration-300",
@@ -338,6 +378,7 @@ const App = () => {
              </button>
 
              {!isFullscreen && (
+               <>
                  <button 
                    onClick={handleClear} 
                    className={clsx(
@@ -351,6 +392,20 @@ const App = () => {
                     <Eraser size={18} className="group-hover:rotate-12 transition-transform" />
                     <span className="text-sm font-medium hidden sm:inline">清除</span>
                  </button>
+
+                 <button 
+                   onClick={handleLogout} 
+                   className={clsx(
+                     "backdrop-blur-md p-2 rounded-full border shadow-2xl transition-all flex items-center justify-center group",
+                     isDark 
+                      ? "bg-stone-900/90 border-stone-800 text-stone-500 hover:text-red-400 hover:bg-stone-800" 
+                      : "bg-white/90 border-stone-200 text-stone-400 hover:text-red-500 hover:bg-gray-50"
+                   )}
+                   title="登出"
+                 >
+                    <LogOut size={18} />
+                 </button>
+               </>
              )}
            </div>
         </div>
