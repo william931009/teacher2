@@ -2,121 +2,186 @@ import React, { useEffect, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { ExplanationStep } from '../types';
+import { Hand } from 'lucide-react';
+import { ExplanationStep, PracticeQuestion } from '../types';
+import { PracticeSection } from './PracticeSection';
 import clsx from 'clsx';
 
 interface BlackboardProps {
   steps: ExplanationStep[];
   currentStepIndex: number;
   isThinking: boolean;
+  isDark: boolean;
+  onRaiseHand?: () => void;
+  isQAMode?: boolean;
+  
+  // Practice Question Props
+  practiceQuestion?: PracticeQuestion | null;
+  isPracticeLoading?: boolean;
+  isPracticeVisible?: boolean;
+  onShowPractice?: () => void;
 }
 
-const TypewriterText = ({ text, isComplete, onComplete }: { text: string, isComplete: boolean, onComplete?: () => void }) => {
-  const [displayedText, setDisplayedText] = useState('');
-  const indexRef = useRef(0);
-  
+// AnimatedMathText that handles dynamic text coloring
+const AnimatedMathText = ({ text, isDark }: { text: string; isDark: boolean }) => {
+  const [opacity, setOpacity] = useState(0);
+
   useEffect(() => {
-    if (isComplete) {
-      setDisplayedText(text);
-      return;
-    }
-
-    setDisplayedText('');
-    indexRef.current = 0;
-
-    const intervalId = setInterval(() => {
-      if (indexRef.current < text.length) {
-        setDisplayedText((prev) => prev + text.charAt(indexRef.current));
-        indexRef.current++;
-      } else {
-        clearInterval(intervalId);
-        if (onComplete) onComplete();
-      }
-    }, 15);
-
-    return () => clearInterval(intervalId);
-  }, [text, isComplete, onComplete]);
+    // Trigger fade-in on mount
+    requestAnimationFrame(() => {
+        setOpacity(1);
+    });
+  }, []);
 
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkMath]}
-      rehypePlugins={[rehypeKatex]}
-      components={{
-        p: ({node, ...props}) => <p className="mb-3 md:mb-5 leading-relaxed" {...props} />,
-        code: ({node, ...props}) => <code className="bg-white/5 px-1 rounded font-mono text-[90%]" {...props} />
-      }}
+    <div 
+        className="transition-opacity duration-700 ease-out" 
+        style={{ opacity: opacity }}
     >
-      {displayedText}
-    </ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          // Use dynamic class for text color
+          p: ({node, ...props}) => (
+            <p className={clsx("mb-2 md:mb-5 leading-relaxed", isDark ? "text-chalk-white" : "text-stone-800")} {...props} />
+          ),
+          // Ensure math blocks have plenty of space
+          div: ({node, ...props}) => <div className="my-3 md:my-4" {...props} />,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
   );
 };
 
-export const Blackboard: React.FC<BlackboardProps> = ({ steps, currentStepIndex, isThinking }) => {
+export const Blackboard: React.FC<BlackboardProps> = ({ 
+  steps, 
+  currentStepIndex, 
+  isThinking, 
+  isDark,
+  onRaiseHand,
+  isQAMode,
+  practiceQuestion,
+  isPracticeLoading,
+  isPracticeVisible,
+  onShowPractice
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Auto scroll effect
   useEffect(() => {
     if (containerRef.current) {
-      // Small timeout to allow render to complete before scrolling
       setTimeout(() => {
         containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' });
-      }, 50);
+      }, 100);
     }
-  }, [steps, currentStepIndex, isThinking]);
+  }, [steps, currentStepIndex, isThinking, practiceQuestion, isPracticeLoading, isPracticeVisible]);
+
+  // Determine if we are at the last step
+  const isLastStep = steps.length > 0 && currentStepIndex === steps.length - 1;
 
   return (
-    <div className="flex-1 min-h-0 relative rounded-2xl md:rounded-3xl border-4 border-blackboard-frame bg-blackboard shadow-2xl overflow-hidden flex flex-col w-full h-full">
-      {/* Realistic Texture Overlay */}
-      <div className="absolute inset-0 pointer-events-none opacity-20 bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')] mix-blend-overlay"></div>
-      <div className="absolute inset-0 pointer-events-none opacity-10 bg-gradient-to-br from-white/5 to-transparent"></div>
+    <div className={clsx(
+      "flex-1 min-h-0 relative rounded-2xl md:rounded-3xl border-4 shadow-2xl overflow-hidden flex flex-col w-full transition-all duration-300 group",
+      isDark 
+        ? "border-blackboard-frame bg-blackboard" 
+        : "border-stone-300 bg-white"
+    )}>
       
-      {/* Content Area */}
+      {/* Raise Hand Button - Bottom Right */}
+      {steps.length > 0 && !isQAMode && (
+         <button
+            onClick={onRaiseHand}
+            className={clsx(
+              "absolute bottom-3 right-3 md:bottom-4 md:right-4 z-30 flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-full shadow-xl border transform transition-all duration-200 hover:scale-105 active:scale-95",
+              isDark 
+                ? "bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-500" 
+                : "bg-emerald-500 border-emerald-400 text-white hover:bg-emerald-400"
+            )}
+         >
+            <Hand size={16} className="md:w-[18px] md:h-[18px]" />
+            <span className="font-bold text-xs md:text-sm">舉手發問</span>
+         </button>
+      )}
+
+      {/* Realistic Texture Overlay (Only for dark mode to simulate chalk dust, or subtle paper for light) */}
+      {isDark && (
+        <div className="absolute inset-0 pointer-events-none opacity-20 bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')] mix-blend-overlay z-0"></div>
+      )}
+      <div className={clsx("absolute inset-0 pointer-events-none opacity-10 bg-gradient-to-br from-white/5 to-transparent z-0", !isDark && "opacity-0")}></div>
+      
+      {/* Scrollable Container */}
       <div 
         ref={containerRef}
-        className="flex-1 overflow-y-auto p-5 md:p-12 font-hand text-xl md:text-3xl tracking-wide leading-relaxed text-chalk-white custom-scrollbar relative z-10 scroll-smooth"
+        className={clsx(
+          "flex-1 overflow-y-auto font-hand text-xl md:text-3xl tracking-wide leading-relaxed custom-scrollbar relative z-10 scroll-smooth",
+          isDark ? "text-chalk-white" : "text-stone-800"
+        )}
       >
-        {steps.length === 0 && !isThinking && (
-          <div className="h-full flex flex-col items-center justify-center text-stone-500/20 select-none">
-            <p className="text-3xl md:text-5xl font-hand tracking-widest opacity-80 rotate-[-2deg]">
-              準備上課...
-            </p>
-          </div>
-        )}
-
-        {steps.map((step, index) => {
-          const isFutureStep = index > currentStepIndex;
-          if (isFutureStep) return null;
-
-          const isCurrentStep = index === currentStepIndex;
-          const isComplete = !isCurrentStep; 
-
-          return (
-            <div key={index} className={clsx("mb-10 md:mb-16 transition-all duration-500", isCurrentStep ? "opacity-100 scale-100" : "opacity-50 blur-[1px] scale-[0.99] origin-left")}>
-              <h3 className="text-chalk-yellow text-xl md:text-2xl font-bold mb-3 md:mb-4 border-b-2 border-stone-600/30 pb-2 inline-block">
-                {step.title}
-              </h3>
-              <div className="text-chalk-white">
-                <TypewriterText 
-                  text={step.blackboardText} 
-                  isComplete={isComplete} 
-                />
+        {/* Content Wrapper */}
+        <div className="p-3 md:p-12 min-h-full">
+            {steps.length === 0 && !isThinking && (
+              <div className="h-[60vh] flex flex-col items-center justify-center select-none transition-colors duration-300">
+                <p className={clsx(
+                  "text-3xl md:text-5xl font-hand tracking-widest rotate-[-2deg]",
+                  isDark ? "text-stone-500/20" : "text-stone-300/40"
+                )}>
+                  {isDark ? "準備上課..." : "準備開始..."}
+                </p>
               </div>
-            </div>
-          );
-        })}
+            )}
 
-        {isThinking && (
-          <div className="flex items-center gap-3 text-chalk-blue mt-8 animate-pulse">
-            <div className="flex gap-1">
-                <span className="w-2.5 h-2.5 bg-chalk-blue rounded-full"></span>
-                <span className="w-2.5 h-2.5 bg-chalk-blue rounded-full animation-delay-200"></span>
-                <span className="w-2.5 h-2.5 bg-chalk-blue rounded-full animation-delay-400"></span>
-            </div>
-            <span className="text-lg md:text-xl font-hand text-stone-400">老師正在思考中...</span>
-          </div>
-        )}
-        
-        {/* Extra space at bottom for scrolling */}
-        <div className="h-12"></div>
+            {steps.map((step, index) => {
+              const isFutureStep = index > currentStepIndex;
+              if (isFutureStep) return null;
+
+              const isCurrentStep = index === currentStepIndex;
+              
+              return (
+                <div key={index} className={clsx("mb-6 md:mb-16 transition-all duration-500", isCurrentStep ? "opacity-100 scale-100" : "opacity-50 blur-[1px] scale-[0.99] origin-left")}>
+                  <h3 className={clsx(
+                    "text-lg md:text-2xl font-bold mb-2 md:mb-4 border-b-2 pb-1 md:pb-2 inline-block",
+                    isDark ? "text-chalk-yellow border-stone-600/30" : "text-blue-600 border-stone-200"
+                  )}>
+                    {step.title}
+                  </h3>
+                  <div>
+                    <AnimatedMathText 
+                      text={step.blackboardText} 
+                      isDark={isDark}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+
+            {isThinking && (
+              <div className={clsx("flex items-center gap-3 mt-6 md:mt-8 animate-pulse", isDark ? "text-chalk-blue" : "text-indigo-500")}>
+                <div className="flex gap-1">
+                    <span className={clsx("w-2 h-2 md:w-2.5 md:h-2.5 rounded-full", isDark ? "bg-chalk-blue" : "bg-indigo-500")}></span>
+                    <span className={clsx("w-2 h-2 md:w-2.5 md:h-2.5 rounded-full animation-delay-200", isDark ? "bg-chalk-blue" : "bg-indigo-500")}></span>
+                    <span className={clsx("w-2 h-2 md:w-2.5 md:h-2.5 rounded-full animation-delay-400", isDark ? "bg-chalk-blue" : "bg-indigo-500")}></span>
+                </div>
+                <span className={clsx("text-base md:text-xl font-hand", isDark ? "text-stone-400" : "text-stone-500")}>老師正在準備課程內容...</span>
+              </div>
+            )}
+
+            {/* Practice Section - Appears ONLY at the last step */}
+            {onShowPractice && isLastStep && (
+               <PracticeSection 
+                  practiceQuestion={practiceQuestion || null} 
+                  isLoading={!!isPracticeLoading}
+                  isVisible={!!isPracticeVisible}
+                  onShow={onShowPractice}
+                  isDark={isDark}
+               />
+            )}
+            
+            {/* Extra space at bottom for scrolling */}
+            <div className="h-20 md:h-24"></div>
+        </div>
       </div>
     </div>
   );

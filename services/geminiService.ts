@@ -1,42 +1,53 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { ExplanationStep } from "../types";
-
-// Initialize the client
-export const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+import { ExplanationStep, ChatMessage, MessageRole, PracticeQuestion } from "../types";
 
 // Constants for model names based on SDK guidelines
 export const MODEL_NAMES = {
   TEACHER: 'gemini-3-flash-preview',       // Fast, supports JSON schema
   TTS: 'gemini-2.5-flash-preview-tts',     // Dedicated TTS model
+  CHAT: 'gemini-3-flash-preview',          // Fast model for chat
 };
 
-// Helper for delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * Validates the API key by making a lightweight request.
+ */
+export const validateApiKey = async (apiKey: string): Promise<boolean> => {
+  if (!apiKey) return false;
+  
+  const ai = new GoogleGenAI({ apiKey });
+  try {
+    // Use the teacher model for a quick validation check (minimal token usage)
+    await ai.models.generateContent({
+      model: MODEL_NAMES.TEACHER,
+      contents: [{ parts: [{ text: "Test" }] }],
+    });
+    return true;
+  } catch (error) {
+    console.warn("API Key Verification Failed:", error);
+    return false;
+  }
+};
 
 /**
  * Generates structured explanation steps for a math/science problem.
- * Supports both text and image input.
- * 
- * @param text The user's question.
- * @param imageBase64 Optional base64 image string.
- * @returns An array of ExplanationStep objects.
  */
-export const generateExplanationSteps = async (text: string, imageBase64: string | null): Promise<ExplanationStep[]> => {
+export const generateExplanationSteps = async (apiKey: string, text: string, imageBase64: string | null): Promise<ExplanationStep[]> => {
+  if (!apiKey) throw new Error("API Key is required for generating explanations");
+
+  const ai = new GoogleGenAI({ apiKey });
+  
   try {
     const parts: any[] = [];
     
-    // Add text part
     if (text) {
       parts.push({ text: text });
     }
 
-    // Add image part if exists
     if (imageBase64) {
-      // Remove data URL prefix if present (e.g., "data:image/png;base64,")
       const base64Data = imageBase64.split(',')[1] || imageBase64;
       parts.push({
         inlineData: {
-          mimeType: "image/jpeg", // Assuming JPEG for simplicity, or detect from string
+          mimeType: "image/jpeg",
           data: base64Data
         }
       });
@@ -48,24 +59,16 @@ export const generateExplanationSteps = async (text: string, imageBase64: string
       model: MODEL_NAMES.TEACHER,
       contents: [{ parts }],
       config: {
-        systemInstruction: `
-You are a strict backend API for an AI Blackboard Teacher. 
+        systemInstruction: `You are a strict backend API for an AI Blackboard Teacher. 
 Your goal is to break down the explanation of the user's math or science question into clear, distinct steps.
 
 Output explicitly as a JSON array of objects.
 Do not output markdown code blocks. Just the raw JSON.
 
 Each object in the array must have exactly these fields:
-1. "title": A short title for the step.
-   - MUST be in Traditional Chinese (繁體中文).
-2. "blackboardText": The mathematical content to be written on the board. 
-   - MUST be purely LaTeX formulas enclosed in single '$' or double '$$' signs.
-   - Do NOT include conversational text in this field. 
-   - Example: "$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$"
-3. "spokenText": The teacher's spoken explanation for this step.
-   - MUST be in Traditional Chinese (繁體中文).
-   - Tone: Encouraging, clear, and professional.
-        `,
+1. "title": A short title for the step. MUST be in Traditional Chinese.
+2. "blackboardText": Purely LaTeX formulas enclosed in '$' or '$$'.
+3. "spokenText": The teacher's spoken explanation for this step. MUST be in Traditional Chinese.`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -85,77 +88,143 @@ Each object in the array must have exactly these fields:
     const responseText = response.text || "[]";
     const steps = JSON.parse(responseText) as ExplanationStep[];
     return steps;
-
   } catch (error) {
-    console.error("Gemini API (Explanation) Error:", error);
+    console.error("Gemini API Error (Explanation):", error);
     throw error;
   }
 };
 
 /**
- * Generates audio for the teacher's voice.
- * Includes retry logic for transient 500 errors.
- * 
- * @param text The text to be spoken.
- * @param voiceName The specific voice character to use.
- * @returns The base64 encoded audio string.
+ * Generates a practice question similar to the original one.
  */
-export const generateTeacherVoice = async (text: string, voiceName: string = 'Kore'): Promise<string> => {
-  const maxRetries = 3;
-  let lastError;
+export const generatePracticeQuestion = async (apiKey: string, originalQuestion: string): Promise<PracticeQuestion> => {
+  if (!apiKey) throw new Error("API Key is required for practice questions");
+  
+  const ai = new GoogleGenAI({ apiKey });
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const response = await ai.models.generateContent({
-        model: MODEL_NAMES.TTS,
-        contents: [{
-          parts: [{ text: text }],
-        }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          // System instruction is crucial here to prevent the model from generating text output
-          // which causes a 400 error when responseModalities is set to only AUDIO.
-          systemInstruction: "You are a text-to-speech engine. Your sole task is to convert the provided text to audio. Do not generate any text or written response.",
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { 
-                voiceName: voiceName 
-              },
-            },
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_NAMES.TEACHER,
+      contents: [{ parts: [{ text: `Original Question: ${originalQuestion}` }] }],
+      config: {
+        systemInstruction: `You are a math/science teacher.
+Based on the "Original Question" provided by the user, design a **new** practice question.
+The new question must test the **same logic and concepts** but use **different numbers**.
+The difficulty level should be consistent with the original question.
+
+Output strictly as a JSON object with the following fields:
+1. "question": The question text. Use LaTeX enclosed in '$' for math. (Traditional Chinese)
+2. "answer": The step-by-step solution and final answer. Use LaTeX enclosed in '$'. (Traditional Chinese)
+3. "hint": A short hint to help the student start. (Optional, Traditional Chinese)`,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            question: { type: Type.STRING },
+            answer: { type: Type.STRING },
+            hint: { type: Type.STRING },
+          },
+          required: ["question", "answer"],
+        },
+      },
+    });
+
+    const responseText = response.text || "{}";
+    return JSON.parse(responseText) as PracticeQuestion;
+  } catch (error) {
+    console.error("Gemini API Error (Practice Question):", error);
+    throw error;
+  }
+};
+
+/**
+ * Generates audio for a given text using the specialized TTS model.
+ */
+export const generateTeacherVoice = async (apiKey: string, text: string, voiceName: string = 'Kore'): Promise<string> => {
+  if (!apiKey) throw new Error("API Key is required for TTS");
+
+  const ai = new GoogleGenAI({ apiKey });
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_NAMES.TTS,
+      contents: [{ parts: [{ text }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName },
           },
         },
-      });
+      },
+    });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      
-      if (!base64Audio) {
-        throw new Error("No audio data received from Gemini TTS");
-      }
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!base64Audio) throw new Error("No audio generated from Gemini TTS");
+    return base64Audio;
 
-      return base64Audio;
-    } catch (error: any) {
-      console.warn(`Gemini TTS Attempt ${attempt} failed:`, error);
-      lastError = error;
-      
-      // Retry on 500 (Internal) or 503 (Unavailable) errors
-      // The error object structure might vary, checking message or status if available
-      const isRetryable = error.status === 'INTERNAL' || 
-                          error.status === 'UNAVAILABLE' || 
-                          (error.message && (error.message.includes('500') || error.message.includes('503')));
-      
-      if (attempt < maxRetries && isRetryable) {
-        // Exponential backoff: 1000ms, 2000ms, 4000ms...
-        await delay(1000 * Math.pow(2, attempt - 1));
-        continue;
-      }
-      
-      // If it's not retryable (e.g. 400 Bad Request), throw immediately
-      if (!isRetryable) {
-         throw error;
-      }
+  } catch (error: any) {
+    // Check for quota exhaustion specifically
+    if (error.status === 429 || (error.message && error.message.includes("429"))) {
+       console.error("Gemini TTS Quota Exceeded");
     }
+    console.error("Gemini API Error (TTS):", error);
+    throw error;
   }
+};
 
-  console.error("Gemini API (TTS) Error after retries:", lastError);
-  throw lastError;
+/**
+ * Handles conversational follow-up questions based on the current blackboard context.
+ */
+export const generateChatResponse = async (
+  apiKey: string, 
+  history: ChatMessage[], 
+  currentSteps: ExplanationStep[],
+  userQuestion: string
+): Promise<string> => {
+  if (!apiKey) throw new Error("API Key is required for chat");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  // Construct context from current steps
+  const contextDescription = currentSteps.map((step, i) => 
+    `Step ${i+1}: ${step.title}\nBoard Content: ${step.blackboardText}\nExplanation: ${step.spokenText}`
+  ).join('\n\n');
+
+  const systemInstruction = `You are an AI Tutor answering a student's follow-up question about the lesson currently on the blackboard.
+Current Lesson Context (Visible on Blackboard):
+${contextDescription}
+
+Rules:
+1. Answer clearly and concisely in Traditional Chinese.
+2. Direct the student's attention to specific steps if relevant (e.g., "Look at Step 2...").
+3. Use LaTeX formatting enclosed in '$' for any math symbols.
+4. Be encouraging and helpful.`;
+
+  // Convert app history to Gemini format
+  const contents = history.map(msg => ({
+    role: msg.role === MessageRole.USER ? 'user' : 'model',
+    parts: [{ text: msg.content }]
+  }));
+
+  // Add the new user question
+  contents.push({
+    role: 'user',
+    parts: [{ text: userQuestion }]
+  });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_NAMES.CHAT,
+      contents: contents,
+      config: {
+        systemInstruction: systemInstruction,
+      }
+    });
+
+    return response.text || "抱歉，我現在無法回答這個問題。";
+  } catch (error) {
+    console.error("Gemini API Error (Chat):", error);
+    throw error;
+  }
 };

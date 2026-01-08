@@ -1,3 +1,4 @@
+
 // Message roles for the chat
 export enum MessageRole {
   USER = 'user',
@@ -24,4 +25,10 @@ export interface ExplanationStep {
   title: string;
   blackboardText: string; // LaTeX formatted string enclosed in $ or $$
   spokenText: string;     // Traditional Chinese spoken explanation
+}
+
+export interface PracticeQuestion {
+  question: string;
+  hint?: string;
+  answer: string;
 }
