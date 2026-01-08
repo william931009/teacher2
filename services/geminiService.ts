@@ -233,3 +233,21 @@ Rules:
     throw error;
   }
 };
+
+/**
+ * Validates the provided API key by making a lightweight API call.
+ */
+export const validateApiKey = async (apiKey: string): Promise<boolean> => {
+  const ai = new GoogleGenAI({ apiKey });
+  try {
+    await ai.models.generateContent({
+      model: MODEL_NAMES.CHAT,
+      contents: "test",
+      config: { maxOutputTokens: 1 },
+    });
+    return true;
+  } catch (error) {
+    console.warn("API Key validation failed", error);
+    return false;
+  }
+};
