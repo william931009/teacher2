@@ -18,8 +18,16 @@ import clsx from 'clsx';
 
 const App = () => {
   // --- Auth State ---
-  // Using localStorage for persistence, but apiKey state is the source of truth for calls
-  const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem('gemini_api_key'));
+  // Priority: 
+  // 1. Environment Variable (Vercel Setting)
+  // 2. Local Storage (User previous input)
+  const [apiKey, setApiKey] = useState<string | null>(() => {
+    // Check for VITE_ prefixed environment variable
+    const envKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    if (envKey) return envKey;
+    
+    return localStorage.getItem('gemini_api_key');
+  });
 
   // --- App State ---
   const [steps, setSteps] = useState<ExplanationStep[]>([]);
@@ -63,6 +71,11 @@ const App = () => {
   const handleLogout = () => {
     stopAudio();
     localStorage.removeItem('gemini_api_key');
+    // If env key exists, logout effectively just resets the view but stays logged in
+    // unless we strictly enforce null. But for user experience, let's allow re-login manually if they want.
+    if ((import.meta as any).env?.VITE_GEMINI_API_KEY) {
+      alert("您目前使用系統預設 Key，重新整理頁面將會自動登入。");
+    }
     setApiKey(null);
     setSteps([]);
     setCurrentStepIndex(0);
