@@ -3,7 +3,7 @@ import { ExplanationStep, ChatMessage, MessageRole, PracticeQuestion } from "../
 
 // Constants for model names based on SDK guidelines
 export const MODEL_NAMES = {
-  TEACHER: 'gemini-3-flash-preview',       // Fast, supports JSON schema
+  TEACHER: 'gemini-3-pro-preview',       // Complex Text Tasks (Math/STEM)
   TTS: 'gemini-2.5-flash-preview-tts',     // Dedicated TTS model
   CHAT: 'gemini-3-flash-preview',          // Fast model for chat
 };
@@ -31,37 +31,14 @@ async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 3, del
 }
 
 /**
- * Validates the API key by making a lightweight request.
- */
-export const validateApiKey = async (apiKey: string): Promise<boolean> => {
-  if (!apiKey) return false;
-  
-  const ai = new GoogleGenAI({ apiKey });
-  
-  try {
-    await retryWithBackoff(() => ai.models.generateContent({
-      model: MODEL_NAMES.TEACHER,
-      contents: [{ parts: [{ text: "Test" }] }],
-    }), 1, 1000); // Less retries for validation
-    return true;
-  } catch (error) {
-    console.warn("API Key Verification Failed:", error);
-    return false;
-  }
-};
-
-/**
  * Generates structured explanation steps for a math/science problem.
  * 
- * @param apiKey - The user's API Key
  * @param prompt - The question text
  * @param imageBase64 - Optional base64 image string
  */
-export const generateExplanationSteps = async (apiKey: string, prompt: string, imageBase64?: string): Promise<ExplanationStep[]> => {
-  if (!apiKey) throw new Error("API Key is required for generating explanations");
-
-  // Dynamic initialization with the provided key
-  const ai = new GoogleGenAI({ apiKey });
+export const generateExplanationSteps = async (prompt: string, imageBase64?: string): Promise<ExplanationStep[]> => {
+  // Use process.env.API_KEY directly
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const parts: any[] = [];
@@ -125,10 +102,8 @@ Each object in the array must have exactly these fields:
 /**
  * Generates a practice question similar to the original one.
  */
-export const generatePracticeQuestion = async (apiKey: string, originalQuestion: string): Promise<PracticeQuestion> => {
-  if (!apiKey) throw new Error("API Key is required for practice questions");
-  
-  const ai = new GoogleGenAI({ apiKey });
+export const generatePracticeQuestion = async (originalQuestion: string): Promise<PracticeQuestion> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   try {
     const response = await retryWithBackoff(() => ai.models.generateContent({
@@ -168,14 +143,11 @@ Output strictly as a JSON object with the following fields:
 /**
  * Generates audio for a given text using the specialized TTS model.
  * 
- * @param apiKey - The user's API Key
  * @param text - The text to speak
  * @param voiceName - The voice to use (default: Kore)
  */
-export const generateTeacherVoice = async (apiKey: string, text: string, voiceName: string = 'Kore'): Promise<string | undefined> => {
-  if (!apiKey) throw new Error("API Key is required for TTS");
-
-  const ai = new GoogleGenAI({ apiKey });
+export const generateTeacherVoice = async (text: string, voiceName: string = 'Kore'): Promise<string | undefined> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const response = await retryWithBackoff(() => ai.models.generateContent({
@@ -213,14 +185,11 @@ export const generateTeacherVoice = async (apiKey: string, text: string, voiceNa
  * Handles conversational follow-up questions based on the current blackboard context.
  */
 export const generateChatResponse = async (
-  apiKey: string, 
   history: ChatMessage[], 
   currentSteps: ExplanationStep[],
   userQuestion: string
 ): Promise<string> => {
-  if (!apiKey) throw new Error("API Key is required for chat");
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Construct context from current steps
   const contextDescription = currentSteps.map((step, i) => 
