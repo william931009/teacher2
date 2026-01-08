@@ -18,6 +18,7 @@ import clsx from 'clsx';
 
 const App = () => {
   // --- Auth State ---
+  // Using localStorage for persistence, but apiKey state is the source of truth for calls
   const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem('gemini_api_key'));
 
   // --- App State ---
@@ -34,8 +35,8 @@ const App = () => {
   
   // --- Practice Question State ---
   const [practiceQuestion, setPracticeQuestion] = useState<PracticeQuestion | null>(null);
-  const [isPracticeLoading, setIsPracticeLoading] = useState(false); // Changed from isGeneratingPractice
-  const [isPracticeVisible, setIsPracticeVisible] = useState(false); // Controls UI visibility
+  const [isPracticeLoading, setIsPracticeLoading] = useState(false); 
+  const [isPracticeVisible, setIsPracticeVisible] = useState(false); 
 
   const isDark = theme === 'dark';
 
@@ -75,8 +76,6 @@ const App = () => {
   const stopAudio = () => {
     if (activeSourceRef.current) {
       try {
-        // CRITICAL FIX: Remove the onended callback before stopping.
-        // This prevents the "auto-next" logic from firing when we manually stop/switch tracks.
         activeSourceRef.current.onended = null;
         activeSourceRef.current.stop();
         activeSourceRef.current.disconnect();
@@ -90,11 +89,15 @@ const App = () => {
     if (audioCacheRef.current.has(index)) return; 
     
     try {
+      // STRICT: Pass apiKey explicitly as first argument
       const base64Audio = await generateTeacherVoice(apiKey, step.spokenText, voice);
-      const audioBuffer = await decodeAudioData(base64Audio);
-      audioCacheRef.current.set(index, audioBuffer);
+      
+      // Handle potential undefined return if no audio was generated
+      if (base64Audio) {
+        const audioBuffer = await decodeAudioData(base64Audio);
+        audioCacheRef.current.set(index, audioBuffer);
+      }
     } catch (err: any) {
-      // If we hit a rate limit or quota error, disable audio for this session to prevent spamming
       if (err.message === "QUOTA_EXCEEDED" || err.status === 429 || (err.message && err.message.includes("429"))) {
          console.warn(`Audio quota exceeded at step ${index}. Disabling audio for this session.`);
          isAudioDisabledRef.current = true;
@@ -106,23 +109,20 @@ const App = () => {
   };
 
   const playCurrentStepAudio = async () => {
-    // Ensure any previous audio is stopped cleanly without triggering next step
     stopAudio(); 
 
     if (!steps[currentStepIndex]) return;
-    if (isAudioDisabledRef.current) return; // Skip if audio is disabled
+    if (isAudioDisabledRef.current) return; 
 
     let buffer = audioCacheRef.current.get(currentStepIndex);
 
     if (!buffer) {
        try {
-         // Priority fetch for current step
          if (apiKey) {
             await fetchAudioForStep(steps[currentStepIndex], currentStepIndex, voiceRef.current);
             buffer = audioCacheRef.current.get(currentStepIndex);
          }
        } catch (e) {
-         // Error handled in fetchAudioForStep (logging/disabling)
          setIsPlaying(false);
          return;
        }
@@ -130,17 +130,12 @@ const App = () => {
 
     if (buffer) {
       activeSourceRef.current = playAudio(buffer, () => {
-        // MANUAL MODE: Just stop playing when finished, do not auto-advance
         setIsPlaying(false);
       });
       
-      // --- LAZY PRE-FETCH STRATEGY ---
-      // Once we start playing step N, we try to fetch N+1 in the background.
-      // This is less aggressive than a loop and spaces requests out by audio duration.
       const nextIndex = currentStepIndex + 1;
       if (nextIndex < steps.length && !audioCacheRef.current.has(nextIndex) && !isAudioDisabledRef.current) {
         fetchAudioForStep(steps[nextIndex], nextIndex, voiceRef.current).catch(e => {
-            // Background fetch errors are just warnings
             console.debug(`Lazy pre-fetch for step ${nextIndex} failed or skipped.`);
         });
       }
@@ -154,7 +149,6 @@ const App = () => {
       stopAudio();
     }
     return () => {
-      // Always stop audio on cleanup (unmount or dependency change)
       stopAudio(); 
     };
   }, [currentStepIndex, isPlaying]);
@@ -182,27 +176,25 @@ const App = () => {
     setSteps([]);
     setCurrentStepIndex(0);
     setIsPlaying(false);
-    // Clear chat history on new topic
     setChatHistory([]); 
     setIsQAMode(false);
     
-    // --- Practice Question Reset & Background Fetch ---
     setPracticeQuestion(null);
-    setIsPracticeVisible(false); // Hide the section initially
-    setIsPracticeLoading(true); // Start loading state for background process
+    setIsPracticeVisible(false); 
+    setIsPracticeLoading(true); 
 
     audioCacheRef.current.clear();
     voiceRef.current = voice;
-    isAudioDisabledRef.current = false; // Reset circuit breaker on new request
+    isAudioDisabledRef.current = false; 
 
     try {
-      // 1. Generate the explanation steps (Text) - Main Thread
-      const generatedSteps = await generateExplanationSteps(apiKey, text, imageBase64);
+      // 1. Generate Explanation - Pass apiKey first
+      // Note: we convert null to undefined to match strict signature if needed, or rely on JS flexibility
+      const safeImage = imageBase64 === null ? undefined : imageBase64;
+      const generatedSteps = await generateExplanationSteps(apiKey, text, safeImage);
       
       if (loadingSessionRef.current !== currentSession) return;
 
-      // 2. IMPORTANT: Pre-fetch ONLY the first step's audio BEFORE rendering the UI.
-      // Subsequent steps will be lazy-fetched during playback to avoid 429 Quota errors.
       if (generatedSteps.length > 0 && !isAudioDisabledRef.current) {
          try {
            await fetchAudioForStep(generatedSteps[0], 0, voice);
@@ -213,13 +205,10 @@ const App = () => {
 
       if (loadingSessionRef.current !== currentSession) return;
 
-      // 3. Now render the steps and stop the spinner
       setSteps(generatedSteps);
       setIsThinking(false);
 
-      // 4. SEQUENTIAL PRACTICE GENERATION
-      // Only start generating practice question AFTER the main content is ready.
-      // This prevents double-hitting the API rate limit at the start.
+      // 4. Generate Practice - Pass apiKey first
       generatePracticeQuestion(apiKey, text)
         .then((data) => {
            if (loadingSessionRef.current === currentSession) {
@@ -237,7 +226,6 @@ const App = () => {
     } catch (error) {
       console.error("Error generating content:", error);
       setIsThinking(false);
-      // Ensure practice loading stops if main generation fails
       setIsPracticeLoading(false);
     }
   };
@@ -245,7 +233,6 @@ const App = () => {
   const handleQASend = async (text: string) => {
     if (!apiKey) return;
     
-    // Add User Message
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: MessageRole.USER,
@@ -256,6 +243,7 @@ const App = () => {
     setIsThinking(true);
 
     try {
+      // Pass apiKey first
       const answer = await generateChatResponse(apiKey, chatHistory, steps, text);
       
       const modelMsg: ChatMessage = {
@@ -279,11 +267,8 @@ const App = () => {
     }
   };
 
-  // When user clicks the "AI 出題" button
   const handleShowPractice = () => {
      setIsPracticeVisible(true);
-     // If it failed or is null but not loading, we might want to retry?
-     // For now, assume background fetch works or is pending.
   };
 
   const handleNext = (isAutoAdvance = false) => {
@@ -346,9 +331,6 @@ const App = () => {
       {/* --- LEFT COLUMN: Blackboard Display --- */}
       <main className={clsx(
         "flex flex-col min-w-0 min-h-0 relative order-1 transition-all duration-300",
-        // Fullscreen Logic:
-        // If Fullscreen: Fixed to inset-0 (full viewport), high Z-index.
-        // If Normal: Standard mobile height or desktop flex.
         isFullscreen 
           ? "fixed inset-0 z-50 h-[100dvh] w-full bg-inherit" 
           : "h-[38dvh] md:h-auto md:flex-1"
@@ -356,7 +338,6 @@ const App = () => {
         
         {/* Floating Header Controls */}
         <div className="absolute top-0 left-0 right-0 p-2 md:p-6 flex justify-between items-start z-30 pointer-events-none">
-           {/* Title Badge - Hidden on very small screens if needed, but generally okay */}
            <div className={clsx(
              "backdrop-blur-md p-1.5 pr-3 md:p-2 md:pr-4 rounded-full border shadow-2xl flex items-center gap-2 md:gap-3 pointer-events-auto transition-colors transform scale-90 md:scale-100 origin-top-left",
              isDark ? "bg-stone-900/90 border-stone-800" : "bg-white/90 border-stone-200"
@@ -369,7 +350,6 @@ const App = () => {
                </h1>
            </div>
 
-           {/* Top Right Action Buttons */}
            <div className="flex items-center gap-2 pointer-events-auto transform scale-90 md:scale-100 origin-top-right">
              <button
                onClick={toggleTheme}
@@ -384,7 +364,6 @@ const App = () => {
                 {isDark ? <Sun size={18} /> : <Moon size={18} />}
              </button>
 
-             {/* Fullscreen Toggle */}
              <button
                onClick={toggleFullscreen}
                className={clsx(
@@ -446,7 +425,6 @@ const App = () => {
            />
         </div>
 
-        {/* Floating Player Controls (Only visible in Fullscreen mode when there are steps) */}
         {isFullscreen && steps.length > 0 && (
            <div className="absolute bottom-6 left-4 right-4 z-40 animate-in fade-in slide-in-from-bottom-4">
                <PlayerControls 
@@ -462,8 +440,6 @@ const App = () => {
         )}
       </main>
 
-      {/* --- RIGHT COLUMN: Sidebar (Controls & Input & Chat) --- */}
-      {/* Hidden when in fullscreen mode */}
       <aside className={clsx(
         "w-full md:w-[340px] xl:w-[380px] border-l flex flex-col shrink-0 shadow-2xl z-40 order-2",
         "h-[62dvh] md:h-full overflow-hidden transition-all duration-300",
@@ -471,12 +447,11 @@ const App = () => {
         isFullscreen && "hidden"
       )}>
          
-         {/* -- View: Standard Lesson Mode -- */}
          {!isQAMode && (
            <>
              <div className={clsx(
                "border-b shrink-0 transition-colors",
-               "p-2 md:p-4", // Smaller padding on mobile
+               "p-2 md:p-4", 
                isDark ? "border-stone-800 bg-stone-900/95" : "border-stone-200 bg-white/95"
              )}>
                 {steps.length > 0 ? (
@@ -500,9 +475,7 @@ const App = () => {
              </div>
 
              <div className={clsx(
-               // Flex-1 allows it to take remaining height.
                "flex-1 overflow-y-auto custom-scrollbar min-h-0 transition-colors",
-               // Bottom padding ensures input doesn't overlap last item
                "p-3 md:p-4 pb-20 md:pb-32",
                isDark ? "bg-stone-900/50" : "bg-stone-50/50"
              )}>
@@ -517,7 +490,6 @@ const App = () => {
            </>
          )}
 
-         {/* -- View: QA Mode -- */}
          {isQAMode && (
             <div className="flex-1 flex flex-col min-h-0">
                <ChatPanel 

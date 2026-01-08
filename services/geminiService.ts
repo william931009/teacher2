@@ -52,20 +52,26 @@ export const validateApiKey = async (apiKey: string): Promise<boolean> => {
 
 /**
  * Generates structured explanation steps for a math/science problem.
+ * 
+ * @param apiKey - The user's API Key
+ * @param prompt - The question text
+ * @param imageBase64 - Optional base64 image string
  */
-export const generateExplanationSteps = async (apiKey: string, text: string, imageBase64: string | null): Promise<ExplanationStep[]> => {
+export const generateExplanationSteps = async (apiKey: string, prompt: string, imageBase64?: string): Promise<ExplanationStep[]> => {
   if (!apiKey) throw new Error("API Key is required for generating explanations");
 
+  // Dynamic initialization with the provided key
   const ai = new GoogleGenAI({ apiKey });
   
   try {
     const parts: any[] = [];
     
-    if (text) {
-      parts.push({ text: text });
+    if (prompt) {
+      parts.push({ text: prompt });
     }
 
     if (imageBase64) {
+      // Handle both raw base64 and data URI
       const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
       parts.push({
         inlineData: {
@@ -161,8 +167,12 @@ Output strictly as a JSON object with the following fields:
 
 /**
  * Generates audio for a given text using the specialized TTS model.
+ * 
+ * @param apiKey - The user's API Key
+ * @param text - The text to speak
+ * @param voiceName - The voice to use (default: Kore)
  */
-export const generateTeacherVoice = async (apiKey: string, text: string, voiceName: string = 'Kore'): Promise<string> => {
+export const generateTeacherVoice = async (apiKey: string, text: string, voiceName: string = 'Kore'): Promise<string | undefined> => {
   if (!apiKey) throw new Error("API Key is required for TTS");
 
   const ai = new GoogleGenAI({ apiKey });
@@ -182,7 +192,10 @@ export const generateTeacherVoice = async (apiKey: string, text: string, voiceNa
     }));
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) throw new Error("No audio generated from Gemini TTS");
+    if (!base64Audio) {
+       console.warn("No audio content returned from Gemini");
+       return undefined;
+    }
     return base64Audio;
 
   } catch (error: any) {
