@@ -9,6 +9,30 @@ export const MODEL_NAMES = {
 };
 
 /**
+ * Helper to clean and parse JSON from potential Markdown formatting
+ */
+function cleanAndParseJson<T>(text: string): T {
+  try {
+    // 1. Try parsing directly
+    return JSON.parse(text);
+  } catch (e) {
+    // 2. Try removing markdown code blocks
+    let clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    try {
+      return JSON.parse(clean);
+    } catch (e2) {
+      // 3. Last resort: try to find the first '[' or '{' and last ']' or '}'
+      const match = clean.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+      if (match) {
+        return JSON.parse(match[0]);
+      }
+      console.error("JSON Parse Failed. Raw text:", text);
+      throw new Error("無法解析 AI 回傳的資料格式，請稍後再試。");
+    }
+  }
+}
+
+/**
  * Helper function to retry operations with exponential backoff
  */
 async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
@@ -91,8 +115,7 @@ Each object in the array must have exactly these fields:
     }));
 
     const responseText = response.text || "[]";
-    const steps = JSON.parse(responseText) as ExplanationStep[];
-    return steps;
+    return cleanAndParseJson<ExplanationStep[]>(responseText);
   } catch (error) {
     console.error("Gemini API Error (Explanation):", error);
     throw error;
@@ -134,7 +157,7 @@ Output strictly as a JSON object with the following fields:
     }));
 
     const responseText = response.text || "{}";
-    return JSON.parse(responseText) as PracticeQuestion;
+    return cleanAndParseJson<PracticeQuestion>(responseText);
   } catch (error) {
     console.error("Gemini API Error (Practice Question):", error);
     throw error;

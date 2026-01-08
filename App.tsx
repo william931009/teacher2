@@ -29,6 +29,7 @@ const App = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // --- Chat/QA State ---
   const [isQAMode, setIsQAMode] = useState(false);
@@ -55,9 +56,9 @@ const App = () => {
   const handleLogin = (key: string) => {
     localStorage.setItem('gemini_api_key', key);
     setApiKey(key);
-    // Reset states on login
     setSteps([]);
     setCurrentStepIndex(0);
+    setError(null);
     isAudioDisabledRef.current = false;
   };
 
@@ -67,6 +68,7 @@ const App = () => {
     setApiKey(null);
     setSteps([]);
     setCurrentStepIndex(0);
+    setError(null);
     setChatHistory([]);
     setIsQAMode(false);
     setPracticeQuestion(null);
@@ -90,10 +92,8 @@ const App = () => {
     if (audioCacheRef.current.has(index)) return; 
     
     try {
-      // STRICT: Pass apiKey explicitly as first argument
       const base64Audio = await generateTeacherVoice(apiKey, step.spokenText, voice);
       
-      // Handle potential undefined return if no audio was generated
       if (base64Audio) {
         const audioBuffer = await decodeAudioData(base64Audio);
         audioCacheRef.current.set(index, audioBuffer);
@@ -175,6 +175,7 @@ const App = () => {
 
     setIsThinking(true);
     setSteps([]);
+    setError(null);
     setCurrentStepIndex(0);
     setIsPlaying(false);
     setChatHistory([]); 
@@ -189,7 +190,7 @@ const App = () => {
     isAudioDisabledRef.current = false; 
 
     try {
-      // 1. Generate Explanation - Pass apiKey first
+      // 1. Generate Explanation
       const safeImage = imageBase64 === null ? undefined : imageBase64;
       const generatedSteps = await generateExplanationSteps(apiKey, text, safeImage);
       
@@ -208,7 +209,7 @@ const App = () => {
       setSteps(generatedSteps);
       setIsThinking(false);
 
-      // 4. Generate Practice - Pass apiKey first
+      // 4. Generate Practice
       generatePracticeQuestion(apiKey, text)
         .then((data) => {
            if (loadingSessionRef.current === currentSession) {
@@ -223,10 +224,11 @@ const App = () => {
            }
         });
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating content:", error);
       setIsThinking(false);
       setIsPracticeLoading(false);
+      setError(error.message || "發生未知錯誤，請檢查網路連線或 API Key。");
     }
   };
 
@@ -243,7 +245,6 @@ const App = () => {
     setIsThinking(true);
 
     try {
-      // Pass apiKey first
       const answer = await generateChatResponse(apiKey, chatHistory, steps, text);
       
       const modelMsg: ChatMessage = {
@@ -300,6 +301,7 @@ const App = () => {
     loadingSessionRef.current += 1;
     setSteps([]);
     setCurrentStepIndex(0);
+    setError(null);
     setIsPlaying(false);
     setChatHistory([]);
     setIsQAMode(false);
@@ -416,6 +418,7 @@ const App = () => {
              currentStepIndex={currentStepIndex} 
              isThinking={isThinking} 
              isDark={isDark}
+             error={error}
              onRaiseHand={() => setIsQAMode(true)}
              isQAMode={isQAMode}
              practiceQuestion={practiceQuestion}

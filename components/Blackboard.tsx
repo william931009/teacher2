@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Hand } from 'lucide-react';
+import { Hand, AlertTriangle } from 'lucide-react';
 import { ExplanationStep, PracticeQuestion } from '../types';
 import { PracticeSection } from './PracticeSection';
 import clsx from 'clsx';
@@ -12,6 +12,7 @@ interface BlackboardProps {
   currentStepIndex: number;
   isThinking: boolean;
   isDark: boolean;
+  error?: string | null;
   onRaiseHand?: () => void;
   isQAMode?: boolean;
   
@@ -61,6 +62,7 @@ export const Blackboard: React.FC<BlackboardProps> = ({
   currentStepIndex, 
   isThinking, 
   isDark,
+  error,
   onRaiseHand,
   isQAMode,
   practiceQuestion,
@@ -77,7 +79,7 @@ export const Blackboard: React.FC<BlackboardProps> = ({
         containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' });
       }, 100);
     }
-  }, [steps, currentStepIndex, isThinking, practiceQuestion, isPracticeLoading, isPracticeVisible]);
+  }, [steps, currentStepIndex, isThinking, practiceQuestion, isPracticeLoading, isPracticeVisible, error]);
 
   // Determine if we are at the last step
   const isLastStep = steps.length > 0 && currentStepIndex === steps.length - 1;
@@ -91,7 +93,7 @@ export const Blackboard: React.FC<BlackboardProps> = ({
     )}>
       
       {/* Raise Hand Button - Bottom Right */}
-      {steps.length > 0 && !isQAMode && (
+      {steps.length > 0 && !isQAMode && !error && (
          <button
             onClick={onRaiseHand}
             className={clsx(
@@ -106,7 +108,7 @@ export const Blackboard: React.FC<BlackboardProps> = ({
          </button>
       )}
 
-      {/* Realistic Texture Overlay (Only for dark mode to simulate chalk dust, or subtle paper for light) */}
+      {/* Realistic Texture Overlay */}
       {isDark && (
         <div className="absolute inset-0 pointer-events-none opacity-20 bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')] mix-blend-overlay z-0"></div>
       )}
@@ -122,7 +124,23 @@ export const Blackboard: React.FC<BlackboardProps> = ({
       >
         {/* Content Wrapper */}
         <div className="p-3 md:p-12 min-h-full">
-            {steps.length === 0 && !isThinking && (
+            {/* Error Display */}
+            {error && (
+               <div className="h-[60vh] flex flex-col items-center justify-center text-center px-4 animate-in fade-in slide-in-from-bottom-5">
+                   <div className="p-4 bg-red-500/10 rounded-full mb-4">
+                      <AlertTriangle size={48} className="text-red-500" />
+                   </div>
+                   <h3 className={clsx("text-2xl font-bold mb-2", isDark ? "text-stone-200" : "text-stone-800")}>
+                     發生錯誤
+                   </h3>
+                   <p className={clsx("text-lg max-w-md", isDark ? "text-stone-400" : "text-stone-600")}>
+                     {error}
+                   </p>
+               </div>
+            )}
+
+            {/* Empty State / Ready State */}
+            {steps.length === 0 && !isThinking && !error && (
               <div className="h-[60vh] flex flex-col items-center justify-center select-none transition-colors duration-300">
                 <p className={clsx(
                   "text-3xl md:text-5xl font-hand tracking-widest rotate-[-2deg]",
@@ -133,7 +151,8 @@ export const Blackboard: React.FC<BlackboardProps> = ({
               </div>
             )}
 
-            {steps.map((step, index) => {
+            {/* Steps Content */}
+            {!error && steps.map((step, index) => {
               const isFutureStep = index > currentStepIndex;
               if (isFutureStep) return null;
 
@@ -157,7 +176,8 @@ export const Blackboard: React.FC<BlackboardProps> = ({
               );
             })}
 
-            {isThinking && (
+            {/* Loading Indicator */}
+            {isThinking && !error && (
               <div className={clsx("flex items-center gap-3 mt-6 md:mt-8 animate-pulse", isDark ? "text-chalk-blue" : "text-indigo-500")}>
                 <div className="flex gap-1">
                     <span className={clsx("w-2 h-2 md:w-2.5 md:h-2.5 rounded-full", isDark ? "bg-chalk-blue" : "bg-indigo-500")}></span>
@@ -169,7 +189,7 @@ export const Blackboard: React.FC<BlackboardProps> = ({
             )}
 
             {/* Practice Section - Appears ONLY at the last step */}
-            {onShowPractice && isLastStep && (
+            {onShowPractice && isLastStep && !error && (
                <PracticeSection 
                   practiceQuestion={practiceQuestion || null} 
                   isLoading={!!isPracticeLoading}
