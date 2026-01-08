@@ -2,8 +2,9 @@ import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/ge
 import { ExplanationStep, ChatMessage, MessageRole, PracticeQuestion } from "../types";
 
 // Constants for model names based on SDK guidelines
+// Switched TEACHER to 'gemini-3-flash-preview' to avoid frequent 429 Quota errors on the free tier
 export const MODEL_NAMES = {
-  TEACHER: 'gemini-3-pro-preview',       // Complex Text Tasks (Math/STEM)
+  TEACHER: 'gemini-3-flash-preview',       // Fast & Capable (Lower latency, higher quota)
   TTS: 'gemini-2.5-flash-preview-tts',     // Dedicated TTS model
   CHAT: 'gemini-3-flash-preview',          // Fast model for chat
 };
@@ -34,22 +35,33 @@ function cleanAndParseJson<T>(text: string): T {
 
 /**
  * Helper function to retry operations with exponential backoff
+ * Handles error message sanitization.
  */
 async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
   try {
     return await operation();
   } catch (error: any) {
+    const errorMsg = error.message || JSON.stringify(error);
+    
     // Check for 429 or specific Quota error messages
     const isQuotaError = 
       error.status === 429 || 
-      (error.message && error.message.includes("429")) || 
-      (error.message && error.message.includes("Quota"));
+      errorMsg.includes("429") || 
+      errorMsg.includes("Quota") || 
+      errorMsg.includes("RESOURCE_EXHAUSTED");
 
-    if (isQuotaError && retries > 0) {
-      console.warn(`API Quota hit. Retrying in ${delay}ms... (Attempts left: ${retries})`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return retryWithBackoff(operation, retries - 1, delay * 2);
+    if (isQuotaError) {
+      if (retries > 0) {
+        console.warn(`API Quota hit. Retrying in ${delay}ms... (Attempts left: ${retries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return retryWithBackoff(operation, retries - 1, delay * 2);
+      } else {
+        // Final failure with a user-friendly message
+        throw new Error("API 呼叫次數過多或額度不足 (429 Quota Exceeded)。請稍後再試，或檢查您的 Google AI Studio 額度設定。");
+      }
     }
+    
+    // Pass through other errors
     throw error;
   }
 }
@@ -196,8 +208,9 @@ export const generateTeacherVoice = async (apiKey: string, text: string, voiceNa
     return base64Audio;
 
   } catch (error: any) {
+    const errorMsg = error.message || JSON.stringify(error);
     // If retry failed and we still have a 429, we throw a specific error for the UI to handle cleanly
-    if (error.status === 429 || (error.message && error.message.includes("429"))) {
+    if (error.status === 429 || errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
        console.warn("Gemini TTS Quota Exceeded despite retries.");
        throw new Error("QUOTA_EXCEEDED");
     }
